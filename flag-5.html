@@ -1,0 +1,1887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Field Order</title>
+<style>
+  :root{
+    --map:#6f7352;          /* olive drab map paper */
+    --panel:#23261c;        /* war-room console */
+    --panel-line:#3d4132;
+    --amber:#e3c16a;        /* console lettering */
+    --amber-dim:rgba(227,193,106,.55);
+    --red:#c94238;
+    --blue:#3b7ab5;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#181a13;}
+  body{
+    font-family:"Jost","Avenir Next",Corbel,"Segoe UI",sans-serif;
+    color:var(--amber);
+    user-select:none;-webkit-user-select:none;
+    display:flex;flex-direction:column;
+  }
+  canvas{display:block;flex:1;min-height:0;cursor:crosshair;touch-action:none;}
+
+  /* ---- the two console rails ---- */
+  .rail{
+    display:flex;align-items:center;gap:14px;
+    padding:8px 14px;
+    background:var(--panel);
+    border-block:1px solid var(--panel-line);
+    font-size:13px;letter-spacing:.03em;
+    flex-wrap:wrap;
+  }
+  #top{border-top:none;}
+  #bottom{border-bottom:none;min-height:42px;}
+
+  .score{display:flex;align-items:center;gap:8px;font-size:15px;}
+  .score b{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;}
+  .pip{width:11px;height:11px;border-radius:2px;transform:rotate(45deg);}
+  .pip.r{background:var(--red);}
+  .pip.b{background:var(--blue);}
+  .pip.y{background:#e8c23a;}
+  .pip.g{background:#46c46a;}
+  .foot.off{display:none;}
+
+  .spacer{flex:1;}
+  .note{color:var(--amber-dim);font-size:12px;}
+
+  button{
+    font:inherit;font-size:12.5px;letter-spacing:.03em;
+    color:var(--amber);
+    background:#2e3226;
+    border:1px solid var(--panel-line);
+    border-radius:3px;
+    padding:7px 11px;
+    cursor:pointer;
+  }
+  button:hover{background:#3a3f2e;}
+  button:active{background:#454b37;}
+  button:focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+  button.on{background:var(--amber);color:#23261c;border-color:var(--amber);}
+  button[disabled]{opacity:.38;cursor:default;}
+  button[disabled]:hover{background:#2e3226;}
+
+  /* ---- the orders for whatever you have selected, always in the same place ---- */
+  #orders{display:flex;gap:7px;flex-wrap:wrap;}
+  #orders button{padding:9px 13px;font-size:13px;}
+  #orders button.go{border-color:var(--amber);color:#f0dda2;}
+  #orders .cost{color:var(--amber-dim);font-size:11.5px;margin-left:7px;}
+
+  /* ---- tablets and small screens: give the board as much room as possible ---- */
+  @media (max-width: 1540px){
+    .rail{gap:8px;padding:6px 10px;font-size:12px;}
+    button{padding:8px 10px;font-size:12px;}
+    #orders button{padding:9px 11px;}
+    .cost{display:none;}
+    .rail .note:first-of-type{display:none;}
+    .score{font-size:13px;gap:5px;}
+    .score .nm{display:none;}             /* on smaller screens the coloured diamond says who is who */
+    .score b{font-size:18px;}
+    #info{max-width:22vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  }
+  @media (max-width: 1000px){
+    #info{display:none;}
+  }
+
+  /* held upright there is not enough width for the board, so ask for sideways */
+  #turn{
+    position:fixed;inset:0;z-index:6;
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:0 40px;text-align:center;
+    background:#181a13;
+  }
+  #turn.show{display:flex;}
+  #turn p{margin:0;font-size:17px;line-height:1.5;color:var(--amber);}
+  #turn small{color:var(--amber-dim);font-size:13px;}
+
+  #fs{
+    position:fixed;z-index:5;
+    right:calc(12px + env(safe-area-inset-right,0px));
+    bottom:calc(56px + env(safe-area-inset-bottom,0px));
+    width:46px;height:46px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:20px;line-height:1;
+    background:rgba(28,31,22,.9);color:var(--amber);
+    border:1px solid var(--panel-line);
+    box-shadow:0 3px 12px rgba(0,0,0,.4);
+    cursor:pointer;
+  }
+  #fs:active{background:#3a3f2e;}
+  #say{
+    position:fixed;z-index:4;left:50%;top:58px;transform:translateX(-50%);
+    background:rgba(28,31,22,.94);
+    border:1px solid var(--panel-line);
+    border-radius:3px;
+    padding:8px 16px;font-size:13px;
+    display:none;pointer-events:none;
+  }
+  #say.open{display:block;}
+</style>
+</head>
+<body>
+
+<div class="rail" id="top">
+  <div class="score"><span class="pip r"></span><span class="nm">Red</span> <b id="sr">0</b></div>
+  <div class="score"><span class="pip b"></span><span class="nm">Blue</span> <b id="sb">0</b></div>
+  <div class="score foot"><span class="pip y"></span><span class="nm">Yellow</span> <b id="sy">0</b></div>
+  <div class="score foot"><span class="pip g"></span><span class="nm">Green</span> <b id="sg">0</b></div>
+  <button id="target">First to 3</button>
+  <div class="spacer"></div>
+  <span class="note">You play</span>
+  <button id="side">Red</button>
+  <button id="ai" class="on">Blue is the computer</button>
+  <button id="level">Computer: fair</button>
+  <button id="armies">Armies: 4</button>
+  <button id="pause">Pause</button>
+  <button id="again">New game</button>
+</div>
+
+<canvas id="cv"></canvas>
+
+<div class="rail" id="bottom">
+  <button id="next">Next unit</button>
+  <span class="note" id="info">Click one of your jeeps to give it an order.</span>
+  <div id="orders"></div>
+  <div class="spacer"></div>
+  <button id="zoomout">Zoom out</button>
+  <button id="zoomin">Zoom in</button>
+  <button id="full">Fill the screen</button>
+</div>
+
+<div id="say"></div>
+
+<button id="fs" aria-label="Fill the screen" title="Fill the screen">⛶</button>
+
+<div id="turn">
+  <p>Turn the tablet sideways to play.</p>
+  <small>The battlefield is a wide map, so it needs a wide screen.</small>
+  <button id="anyway">Play upright anyway</button>
+</div>
+
+<script>
+'use strict';
+/* =====================================================================
+   FIELD ORDER - capture the flag
+   Two armies, one flag in the middle of the map. Drive a jeep over the
+   flag to pick it up, carry it home to your own base to score a point.
+   Everything happens at once; the timers on the factories are what make
+   you choose what to build next.
+   ===================================================================== */
+
+/* ======== SETTINGS YOU CAN CHANGE ======== */
+let   WIN_AT          = 3;     // flags needed to win the game. Set it to 3, 5 or 10.
+                               // The First to button in the top bar changes it while you play.
+
+const FEET            = 2;     // pixels per "foot". Raise it and every range below gets longer on screen
+
+// --- how far things shoot, in feet ---
+const BULLET_RANGE    = 100;   // jeep machine gun
+const GRENADE_RANGE   = 60;    // how far a jeep can throw a grenade
+const TANK_RANGE      = 200;   // tank missile
+const ARTY_RANGE      = 500;   // artillery, for defending your own half
+
+// --- damage ---
+const DMG_BULLET      = 1;
+const DMG_GRENADE     = 3;     // full damage within 10 feet of where it lands
+const DMG_TANK        = 5;
+const DMG_ARTY        = 3;
+
+// --- life ---
+const HP_JEEP         = 10;
+const HP_TANK         = 10;
+const HP_BARRICADE    = 5;
+const HP_ARTY         = 5;
+const HP_FACTORY      = 20;
+
+// --- ammunition ---
+const AMMO_BULLETS    = 100;   // per jeep
+const AMMO_GRENADES   = 10;    // per jeep
+const AMMO_TANK       = 10;    // missiles per tank
+const ARTY_ROUNDS     = 4;     // artillery fires this many, then has to cool off
+const ARTY_RELOAD     = 15;    // seconds between artillery rounds
+const ARTY_COOLOFF    = 120;   // seconds of cooling off after the last round
+const RESUPPLY        = true;  // true = a unit on or right beside its own base slowly refills its ammo
+
+// --- speed, in pixels per frame at 60 frames a second ---
+const SPEED_JEEP      = 1.3;
+const SPEED_TANK      = SPEED_JEEP / 3;
+
+// --- how long things take to build, in seconds ---
+const BUILD_JEEP      = 5;
+const BUILD_BARRICADE = 5;
+const BUILD_ARTY      = 5;
+const BUILD_TANK      = 10;
+const BUILD_FACTORY   = 15;
+
+const FLAG_SLOW       = 0.7;   // a unit carrying the flag drives this much of its normal speed
+const HURT_SLOWS      = true;  // true = a damaged unit moves slower, down to half speed at near-zero life
+// --- the two foot-soldier armies: yellow at the top, green at the bottom ---
+const FOOT_ARMIES     = true;  // true = four armies. false = just red and blue. The Armies button changes it too
+const WAVE_EVERY      = 20;    // seconds between waves of soldiers
+const REINFORCE_EVERY = 60;    // seconds: yellow & green get 6 soldiers; red & blue get an engineer + a soldier
+const REINFORCE_FOOT  = 6;     // soldiers yellow/green get on the timer and on a base tap
+const MAX_ENGINEERS   = 3;     // red/blue never get a reinforcement engineer beyond this many
+const WAVE_SIZE       = 6;     // soldiers in each wave
+const SOLDIER_MAX     = 14;    // no new wave while a side already has this many soldiers
+const HP_SOLDIER      = 5;     // takes 5 bullets to drop one; a single tank round still does it
+const SPEED_SOLDIER   = SPEED_JEEP * 0.55;   // on foot, a lot slower than a jeep
+
+const PATROL_RANGE    = 260;   // how far from home a unit wanders while it is still guarding home
+const ROUTE_POINTS    = 3;     // most stops you can put on one patrol route
+const MAX_UNITS       = 22;    // a factory run waits while you already have this many vehicles
+const BATCH_JEEPS     = 5;     // a jeep run makes this many scout jeeps, then one engineer, then the factory pauses
+const BATCH_TANKS     = 5;     // a tank run makes this many tanks, then the factory pauses
+const WALL_SIZE       = 5;     // barricades in each of the engineer's wall plans
+const WALL_BASE_AHEAD = 250;   // Defence 1: how far in front of your base the wall goes, in pixels
+const MANUAL_WALL     = 4;
+const ARTY_ROW_MAX    = 5;     // most guns laid when you draw a row of artillery
+const ARTY_GAP        = 38;    // pixels between guns in a drawn row (walls use 36; guns are a little wider)     // barricades laid when you draw a wall between two points
+
+// How hard the computer plays. Each line is easy / fair / hard.
+const DIFF = {
+  easy: { think: 2.2, units: 4,  walls: 5,  guns: 1, tanks: 1, build: 1.6 },
+  fair: { think: 1.2, units: 8,  walls: 9,  guns: 2, tanks: 2, build: 1.0 },
+  hard: { think: 0.8, units: 14, walls: 13, guns: 3, tanks: 4, build: 0.75 }
+};
+/* ========================================= */
+
+const TAU = Math.PI * 2;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function angDiff(a, b){ let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; }
+
+const cv = document.getElementById('cv'), g = cv.getContext('2d');
+const el = id => document.getElementById(id);
+const orders = el('orders'), say = el('say');
+
+/* ---------------- the map ---------------- */
+const WORLD_W = 1800, WORLD_H = 1050;
+let VW = 0, VH = 0, dpr = 1;                     // the size of the window we are looking through
+const cam = { x: WORLD_W / 2, y: WORLD_H / 2, zoom: 1 };
+
+function fitZoom(){ return Math.min(VW / WORLD_W, VH / WORLD_H); }
+function clampCam(){
+  const z = cam.zoom, hw = VW / 2 / z, hh = VH / 2 / z;
+  cam.x = hw * 2 >= WORLD_W ? WORLD_W / 2 : clamp(cam.x, hw, WORLD_W - hw);
+  cam.y = hh * 2 >= WORLD_H ? WORLD_H / 2 : clamp(cam.y, hh, WORLD_H - hh);
+}
+// world point -> screen point, and back again
+const w2sx = x => (x - cam.x) * cam.zoom + VW / 2;
+const w2sy = y => (y - cam.y) * cam.zoom + VH / 2;
+const s2wx = sx => (sx - VW / 2) / cam.zoom + cam.x;
+const s2wy = sy => (sy - VH / 2) / cam.zoom + cam.y;
+
+function resize(){
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const r = cv.getBoundingClientRect();
+  VW = Math.max(320, Math.round(r.width));
+  VH = Math.max(240, Math.round(r.height));
+  cv.width = Math.round(VW * dpr); cv.height = Math.round(VH * dpr);
+  cam.zoom = Math.max(cam.zoom, fitZoom());
+  clampCam();
+  paintMap();
+}
+
+/* The map itself is drawn once onto its own canvas, then stamped down each
+   frame. Drawing all that grain every frame would make the game crawl. */
+const mapCv = document.createElement('canvas'), mg = mapCv.getContext('2d');
+function paintMap(){
+  mapCv.width = WORLD_W; mapCv.height = WORLD_H;
+  mg.fillStyle = '#6f7352'; mg.fillRect(0, 0, WORLD_W, WORLD_H);
+
+  // soft patches of lighter and darker ground
+  for (let i = 0; i < 150; i++){
+    const x = rnd(-60, WORLD_W + 60), y = rnd(-60, WORLD_H + 60), r = rnd(60, 230);
+    const light = Math.random() < 0.5;
+    const grd = mg.createRadialGradient(x, y, 0, x, y, r);
+    grd.addColorStop(0, light ? 'rgba(150,154,116,0.20)' : 'rgba(70,74,52,0.18)');
+    grd.addColorStop(1, light ? 'rgba(150,154,116,0)' : 'rgba(70,74,52,0)');
+    mg.fillStyle = grd; mg.beginPath(); mg.arc(x, y, r, 0, TAU); mg.fill();
+  }
+  // scrub
+  for (let i = 0; i < 2600; i++){
+    const x = rnd(0, WORLD_W), y = rnd(0, WORLD_H);
+    mg.fillStyle = Math.random() < 0.5 ? 'rgba(96,101,70,0.5)' : 'rgba(132,136,100,0.4)';
+    mg.beginPath(); mg.ellipse(x, y, rnd(1, 3), rnd(0.6, 2), rnd(0, TAU), 0, TAU); mg.fill();
+  }
+  // survey grid, the way it would be printed on a field map
+  mg.strokeStyle = 'rgba(40,44,28,0.16)'; mg.lineWidth = 1;
+  for (let x = 150; x < WORLD_W; x += 150){ mg.beginPath(); mg.moveTo(x, 0); mg.lineTo(x, WORLD_H); mg.stroke(); }
+  for (let y = 150; y < WORLD_H; y += 150){ mg.beginPath(); mg.moveTo(0, y); mg.lineTo(WORLD_W, y); mg.stroke(); }
+  // the halfway line: you cannot put a new base past this
+  mg.strokeStyle = 'rgba(232,226,200,0.28)'; mg.lineWidth = 2; mg.setLineDash([12, 12]);
+  mg.beginPath(); mg.moveTo(WORLD_W / 2, 0); mg.lineTo(WORLD_W / 2, WORLD_H); mg.stroke();
+  mg.setLineDash([]);
+  // a dark border so the edge of the world reads as an edge
+  mg.strokeStyle = 'rgba(30,33,20,0.5)'; mg.lineWidth = 8;
+  mg.strokeRect(4, 4, WORLD_W - 8, WORLD_H - 8);
+}
+
+/* ---------------- the two armies ---------------- */
+let units = [], builds = [], shots = [], bursts = [];
+const TEAMS = ['red', 'blue', 'yellow', 'green'];
+const FOOT = ['yellow', 'green'];                 // the armies that fight on foot
+const TEAM_NAME = { red: 'Red', blue: 'Blue', yellow: 'Yellow', green: 'Green' };
+let footOn = FOOT_ARMIES;                         // what the next new game will have
+let gameFoot = FOOT_ARMIES;                       // what this game has
+let flag = null, score = { red: 0, blue: 0, yellow: 0, green: 0 };
+let myTeam = 'red', aiPlays = 'blue', paused = false, winner = null;
+let level = 'fair';                               // how hard the computer plays
+const D = () => DIFF[level];
+const other = t => t === 'red' ? 'blue' : 'red';
+const home = {};                                  // home.red / home.blue = that side's first base
+
+const SPEC = {
+  jeep:      { hp: HP_JEEP,      speed: SPEED_JEEP, r: 11, range: BULLET_RANGE * FEET, dmg: DMG_BULLET, cool: 0.5 },
+  engineer:  { hp: HP_JEEP,      speed: SPEED_JEEP, r: 11, range: 0,                   dmg: 0,          cool: 0 },
+  tank:      { hp: HP_TANK,      speed: SPEED_TANK, r: 15, range: TANK_RANGE * FEET,   dmg: DMG_TANK,   cool: 2.2 },
+  soldier:   { hp: HP_SOLDIER,   speed: SPEED_SOLDIER, r: 7, range: BULLET_RANGE * FEET * 0.8, dmg: DMG_BULLET, cool: 0.9 },
+  base:      { hp: 0,            r: 34 },
+  factory:   { hp: HP_FACTORY,   r: 26 },
+  artillery: { hp: HP_ARTY,      r: 15, range: ARTY_RANGE * FEET, dmg: DMG_ARTY },
+  barricade: { hp: HP_BARRICADE, r: 13 }
+};
+const NAME = { jeep: 'Scout jeep', engineer: 'Engineer jeep', tank: 'Tank', soldier: 'Soldier',
+               base: 'Base', factory: 'Factory', artillery: 'Artillery', barricade: 'Barricade' };
+
+class Unit{
+  constructor(team, kind, x, y){
+    const s = SPEC[kind];
+    this.team = team; this.kind = kind;
+    this.x = x; this.y = y; this.a = Math.atan2(WORLD_H / 2 - y, WORLD_W / 2 - x);   // facing the middle
+    this.hp = s.hp; this.maxhp = s.hp; this.r = s.r; this.speed = s.speed;
+    this.bullets = AMMO_BULLETS; this.grenades = AMMO_GRENADES;
+    this.missiles = kind === 'tank' ? AMMO_TANK : 0;
+    this.cool = 0;                      // seconds until it can shoot again
+    this.order = null;                  // {type:'move'|'attack'|'build', x, y, what}
+    this.work = 0;                      // seconds of building done so far
+    this.carrying = false;              // has the flag
+    this.guard = true;                  // still guarding home; goes false the moment you give it an order
+    this.route = null;                  // list of stops it walks round and round
+    this.plan = null;                   // engineer: the barricade spots still to build in a wall plan
+    this.leg = 0;                       // which stop it is heading for
+    this.want = this.a; this.wander = 0;
+    this.dead = false;
+  }
+  get ammo(){ return this.kind === 'tank' ? this.missiles : this.bullets; }
+  get range(){ return SPEC[this.kind].range; }
+}
+
+class Build{
+  constructor(team, kind, x, y){
+    const s = SPEC[kind];
+    this.team = team; this.kind = kind; this.x = x; this.y = y;
+    this.hp = s.hp; this.maxhp = s.hp; this.r = s.r;
+    this.queue = null;                  // factory: {what, left, total}
+    this.batch = null;                  // a factory run: {kind, route, made, total}
+    this.lastRun = null;                // the last run, so you can start it again with one tap
+    this.rounds = ARTY_ROUNDS;          // artillery
+    this.cool = 0; this.off = 0;        // reload timer, and the long cool-off
+    this.dead = false;
+    this.a = 0;                         // artillery barrel angle
+  }
+}
+
+const blocks = b => b.kind !== 'base';                 // your own base you can drive over; everything else stops you
+const solid  = () => builds.filter(b => !b.dead && blocks(b));
+
+function newGame(){
+  units = []; builds = []; shots = []; bursts = [];
+  score = { red: 0, blue: 0, yellow: 0, green: 0 }; winner = null; paused = false;
+  gameFoot = footOn;
+  for (const e of document.querySelectorAll('.foot')) e.classList.toggle('off', !gameFoot);
+  el('pause').textContent = 'Pause';
+
+  const mid = WORLD_H / 2;
+  for (const [team, bx, fx] of [['red', 150, 290], ['blue', WORLD_W - 150, WORLD_W - 290]]){
+    const base = new Build(team, 'base', bx, mid);
+    builds.push(base); home[team] = base;
+    builds.push(new Build(team, 'factory', fx, mid));
+    const dir = team === 'red' ? 1 : -1;
+    units.push(new Unit(team, 'jeep',     bx + dir * 70, mid - 70));
+    units.push(new Unit(team, 'jeep',     bx + dir * 70, mid + 70));
+    units.push(new Unit(team, 'engineer', bx + dir * 50, mid));
+  }
+  // the foot armies: just a base each, top and bottom. Their soldiers come in waves.
+  delete home.yellow; delete home.green;
+  if (gameFoot){
+    for (const [team, by] of [['yellow', 105], ['green', WORLD_H - 105]]){
+      const base = new Build(team, 'base', WORLD_W / 2, by);
+      builds.push(base); home[team] = base;
+    }
+  }
+  waveClock = { yellow: 1, green: 1 }; reinforceClock = REINFORCE_EVERY;
+  flag = { x: WORLD_W / 2, y: mid, held: null, bob: 0 };
+  sel = null; pending = null; closeMenu();
+  paintScore();
+}
+
+/* ---------------- moving about ---------------- */
+
+// Nothing may sit inside a barricade, a factory or an artillery piece.
+// A scout jeep that drives into a barricade shoves it along instead, which is
+// how you open a gap in a wall without blowing it up.
+/* How braced a barricade is by its neighbours, and whether it is locked in a line.
+   A neighbour counts if it is within one barricade-width. factor is the fraction
+   of normal push speed: 1 alone, .75 with one neighbour, .5 with two, 0 with three+.
+   If the neighbours line up (roughly same row or column), the barricade is locked
+   along that line and can only be shoved across it. */
+function braceOf(b){
+  const reach = SPEC.barricade.r * 2 + 4;
+  const near = [];
+  for (const o of builds){
+    if (o === b || o.dead || o.kind !== 'barricade') continue;
+    if (Math.hypot(o.x - b.x, o.y - b.y) <= reach) near.push(o);
+  }
+  const n = near.length;
+  const factor = n === 0 ? 1 : n === 1 ? 0.75 : n === 2 ? 0.5 : 0;
+  // The locked direction is the direction the LINE runs, i.e. toward a neighbour.
+  // Barricades side by side (neighbour east/west) make a horizontal line, locked E-W.
+  // Barricades stacked (neighbour north/south) make a vertical line, locked N-S.
+  let locked = false, lx = 0, ly = 0;
+  for (const o of near){
+    const ex = o.x - b.x, ey = o.y - b.y;
+    if (Math.abs(ex) >= Math.abs(ey)){ locked = true; lx = 1; ly = 0; }        // neighbour to the side -> line runs E-W
+    else { locked = true; lx = 0; ly = 1; }                                    // neighbour above/below -> line runs N-S
+  }
+  return { factor, locked, lx, ly };
+}
+
+function collide(u, dt){
+  for (const b of solid()){
+    if (b.kind === 'barricade' && b.team === u.team) continue;   // your own walls open for your own vehicles
+    const dx = u.x - b.x, dy = u.y - b.y;
+    const need = u.r + b.r, d = Math.hypot(dx, dy) || 0.01;
+    if (d >= need) continue;
+    if (b.kind === 'barricade' && (u.kind === 'jeep' || u.kind === 'engineer')){
+      // How hard is this barricade to shift? Nearby barricades brace it:
+      // one neighbour -> quarter slower, two -> half, three or more -> immovable.
+      // And a barricade braced along a line can't be pushed ALONG that line, only across it.
+      const br = braceOf(b);
+      if (br.factor > 0){
+        let px = -dx / d, py = -dy / d;                // the way we're trying to shove it
+        if (br.locked){                                // strip out any motion along the locked line
+          const along = px * br.lx + py * br.ly;
+          px -= along * br.lx; py -= along * br.ly;
+        }
+        const plen = Math.hypot(px, py);
+        if (plen > 0.01){
+          // across-the-line pushes are slowed by how many neighbours brace it
+          const factor = br.locked ? Math.max(br.factor, 0.4) : br.factor;
+          const push = Math.min(u.speed * dt * 60 * 0.55 * factor, need - d) * plen;
+          const nx = clamp(b.x + px / plen * push, 40, WORLD_W - 40);
+          const ny = clamp(b.y + py / plen * push, 40, WORLD_H - 40);
+          let free = true;
+          for (const o of builds){
+            if (o === b || o.dead || o.kind === 'base') continue;
+            if (Math.hypot(o.x - nx, o.y - ny) < o.r + b.r - 2){ free = false; break; }
+          }
+          if (free){ b.x = nx; b.y = ny; }
+        }
+      }
+      u.x = b.x + dx / d * need; u.y = b.y + dy / d * need;
+    } else {
+      u.x = b.x + dx / d * need; u.y = b.y + dy / d * need;
+    }
+  }
+  u.x = clamp(u.x, 20, WORLD_W - 20);
+  u.y = clamp(u.y, 20, WORLD_H - 20);
+}
+
+// Steer toward a point. Returns true once it has arrived.
+function driveTo(u, tx, ty, dt, stopAt){
+  const d = Math.hypot(tx - u.x, ty - u.y);
+  if (d < (stopAt || 6)) return true;
+  u.want = Math.atan2(ty - u.y, tx - u.x);
+  const turn = (u.kind === 'tank' ? 0.055 : 0.12) * dt * 60;
+  u.a += angDiff(u.a, u.want) * Math.min(1, turn);
+  const hurt = HURT_SLOWS ? 0.5 + 0.5 * Math.max(0, u.hp) / u.maxhp : 1;   // damaged units move slower, down to half speed
+  const step = u.speed * hurt * (u.carrying && u.kind !== 'soldier' ? FLAG_SLOW : 1) * dt * 60;   // a soldier is already at walking pace
+  u.x += Math.cos(u.a) * step;
+  u.y += Math.sin(u.a) * step;
+  return false;
+}
+
+// Finished its orders and has no route: it stops where it is and waits.
+function holdGround(u, dt){
+  // These vehicles have no run-on, so holding position simply means not driving.
+  // It still turns to face whatever it is shooting at, which stepUnit handles.
+  u.held = true;
+}
+
+// Is an enemy carrying the flag right now? Then everybody who can should go after them.
+function flagThief(team){ return flag.held && flag.held.team !== team && flag.held.team ? flag.held : null; }
+
+// Walking a patrol route, round and round its stops.
+// A tank stops and fights whatever it meets; a jeep keeps rolling and shoots on the way past.
+// But if an enemy has the flag, the unit leaves its route to chase the carrier, then resumes.
+function walkRoute(u, dt){
+  const thief = flagThief(u.team);
+  if (thief){
+    driveTo(u, thief.x, thief.y, dt, u.range * 0.85);     // close to firing range of the carrier
+    return;
+  }
+  if (u.kind === 'tank' && nearestEnemy(u, u.team, u.range)){ holdGround(u, dt); return; }
+  const p = u.route[u.leg % u.route.length];
+  if (driveTo(u, p.x, p.y, dt, 16)) u.leg = (u.leg + 1) % u.route.length;
+}
+
+// Before you have given it anything to do, a unit patrols near home.
+function patrol(u, dt){
+  const h = home[u.team];
+  u.wander -= dt;
+  if (u.wander <= 0 || !u.px){
+    u.wander = rnd(2.5, 6);
+    // guard the open side of the base rather than piling up against the map edge
+    const face = Math.atan2(WORLD_H / 2 - h.y, WORLD_W / 2 - h.x);   // toward the middle of the map
+    const a = face + rnd(-1.5, 1.5), r = rnd(70, PATROL_RANGE);
+    u.px = clamp(h.x + Math.cos(a) * r, 80, WORLD_W - 80);
+    u.py = clamp(h.y + Math.sin(a) * r, 80, WORLD_H - 80);
+  }
+  if (driveTo(u, u.px, u.py, dt, 14)) u.wander = Math.min(u.wander, rnd(0.5, 2));
+}
+
+/* ---------------- shooting ---------------- */
+function nearestEnemy(from, team, within, wallsToo){
+  let best = null, bd = within, wall = null, wd = within;
+  for (const o of [...units, ...builds]){
+    if (o.dead || o.team === team || o.kind === 'base') continue;
+    const d = dist(from, o);
+    if (o.kind === 'barricade'){ if (wallsToo && d < wd){ wd = d; wall = o; } continue; }
+    if (d < bd){ bd = d; best = o; }
+  }
+  return best || wall;                          // vehicles and guns first, walls only if nothing else
+}
+function fire(from, tx, ty, kind){
+  const a = Math.atan2(ty - from.y, tx - from.x);
+  const reach = kind === 'bullet' ? BULLET_RANGE : kind === 'missile' ? TANK_RANGE
+              : kind === 'grenade' ? GRENADE_RANGE : ARTY_RANGE;
+  const s = kind === 'bullet'   ? { sp: 9,  dmg: DMG_BULLET, blast: 0 }
+          : kind === 'missile'  ? { sp: 5.5, dmg: DMG_TANK,  blast: 12 }
+          : kind === 'grenade'  ? { sp: SPEED_TANK * 2.2, dmg: DMG_GRENADE, blast: 40 * FEET }
+          :                       { sp: SPEED_JEEP * 1.6, dmg: DMG_ARTY, blast: 34 * FEET };
+  shots.push({
+    x: from.x + Math.cos(a) * (from.r + 3), y: from.y + Math.sin(a) * (from.r + 3),
+    tx, ty, a, sp: s.sp, dmg: s.dmg, blast: s.blast, kind, team: from.team,
+    left: reach * FEET * 1.06, arc: kind === 'grenade' || kind === 'arty'
+  });
+}
+function hurt(o, dmg){
+  if (!o || o.dead || o.kind === 'base') return;
+  o.hp -= dmg;
+  if (o.hp <= 0){
+    o.dead = true;
+    bursts.push({ x: o.x, y: o.y, t: 0, big: o.kind === 'tank' || o.kind === 'factory' });
+    if (o.carrying){ flag.held = null; flag.x = o.x; flag.y = o.y; }   // the flag falls where it is dropped
+  }
+}
+// A grenade or shell hurts everything near where it lands, less the further out.
+// Within 10 feet: full. 20 feet: half. 30 feet: same as a bullet. Beyond 40: nothing.
+function blastAt(x, y, dmg){
+  for (const o of [...units, ...builds]){
+    if (o.dead || o.kind === 'base') continue;
+    const d = Math.hypot(o.x - x, o.y - y) / FEET;
+    if (d <= 10)      hurt(o, dmg);
+    else if (d <= 20) hurt(o, dmg / 2);
+    else if (d <= 30) hurt(o, DMG_BULLET);
+  }
+}
+function stepShots(dt){
+  for (const s of shots){
+    const step = s.sp * dt * 60;
+    s.x += Math.cos(s.a) * step; s.y += Math.sin(s.a) * step;
+    s.left -= step;
+    let done = s.left <= 0;                     // a round runs out of steam at the end of its range
+    if (s.arc){
+      // a lobbed round: it goes off where it was aimed
+      if (Math.hypot(s.tx - s.x, s.ty - s.y) < step + 3){
+        blastAt(s.x, s.y, s.dmg);
+        bursts.push({ x: s.x, y: s.y, t: 0, big: true });
+        done = true;
+      }
+    } else {
+      for (const o of [...units, ...builds]){
+        if (o.dead || o.team === s.team || o.kind === 'base') continue;
+        if (Math.hypot(o.x - s.x, o.y - s.y) < o.r){
+          if (s.blast){ blastAt(s.x, s.y, s.dmg); bursts.push({ x: s.x, y: s.y, t: 0, big: true }); }
+          else { hurt(o, s.dmg); bursts.push({ x: s.x, y: s.y, t: 0, big: false }); }
+          done = true; break;
+        }
+      }
+    }
+    if (s.x < 0 || s.x > WORLD_W || s.y < 0 || s.y > WORLD_H) done = true;
+    if (done) s.gone = true;
+  }
+  shots = shots.filter(s => !s.gone);
+  for (const b of bursts) b.t += dt;
+  bursts = bursts.filter(b => b.t < 0.45);
+}
+
+/* ---------------- what each unit does this frame ---------------- */
+function stepUnit(u, dt){
+  if (u.cool > 0) u.cool -= dt;
+
+  // stuck against something? slide along it instead of grinding forever
+  if (u.order && (u.order.type === 'move' || u.order.type === 'attack')){
+    const moved = Math.hypot(u.x - (u.lx ?? u.x), u.y - (u.ly ?? u.y));
+    u.stuck = moved < 0.35 * dt * 60 ? (u.stuck || 0) + dt : 0;
+    if (u.stuck > 1.2){
+      u.a += (Math.random() < 0.5 ? 1 : -1) * 1.1;     // turn sharply and try another way round
+      u.want = u.a; u.stuck = 0;
+    }
+  } else u.stuck = 0;
+  u.lx = u.x; u.ly = u.y;
+
+  // shoot at anything that wanders into range, no order needed
+  if (u.range && u.cool <= 0 && u.ammo > 0){
+    const t = nearestEnemy(u, u.team, u.range);
+    if (t){
+      fire(u, t.x, t.y, u.kind === 'tank' ? 'missile' : 'bullet');
+      if (u.kind === 'tank') u.missiles--; else u.bullets--;
+      u.cool = SPEC[u.kind].cool;
+      u.a += angDiff(u.a, Math.atan2(t.y - u.y, t.x - u.x)) * 0.3;
+    }
+  }
+
+  const o = u.order;
+  if (!o){
+    // only the one carrying the flag heads for base; everyone else stays where you left them
+    if (u.carrying) driveTo(u, home[u.team].x, home[u.team].y, dt, 8);
+    else if (u.plan) nextWallPiece(u);
+    else if (u.route && u.route.length) walkRoute(u, dt);
+    else {
+      const thief = flagThief(u.team);
+      // a guard or an idle unit chases a thief that has come into its half of the map
+      if (thief && u.kind !== 'engineer' && Math.hypot(thief.x - home[u.team].x, thief.y - home[u.team].y) < WORLD_W * 0.6){
+        driveTo(u, thief.x, thief.y, dt, u.range * 0.85);
+      } else if (u.guard) patrol(u, dt);
+      else holdGround(u, dt);
+    }
+  } else if (o.type === 'move'){
+    if (driveTo(u, o.x, o.y, dt, 10)) u.order = null;
+  } else if (o.type === 'attack'){
+    // close to within range of the spot, then shell it
+    const d = Math.hypot(o.x - u.x, o.y - u.y);
+    if (d > u.range * 0.85) driveTo(u, o.x, o.y, dt);
+    else if (u.cool <= 0 && u.ammo > 0){
+      fire(u, o.x, o.y, u.kind === 'tank' ? 'missile' : 'bullet');
+      if (u.kind === 'tank') u.missiles--; else u.bullets--;
+      u.cool = SPEC[u.kind].cool;
+    }
+  } else if (o.type === 'grenade'){
+    if (Math.hypot(o.x - u.x, o.y - u.y) > GRENADE_RANGE * FEET) driveTo(u, o.x, o.y, dt);
+    else {
+      if (u.grenades > 0){ fire(u, o.x, o.y, 'grenade'); u.grenades--; }
+      u.order = null;
+    }
+  } else if (o.type === 'build'){
+    u.waiting = false;                                  // engineers now build wherever ordered, even under fire
+    if (!driveTo(u, o.x, o.y, dt, 34)) { /* still driving out to the spot */ }
+    else {
+      u.work += dt;
+      if (u.work >= o.time){
+        if (roomFor(o.x, o.y, SPEC[o.what].r)){
+          if (o.what === 'jeep' || o.what === 'tank' || o.what === 'engineer') units.push(new Unit(u.team, o.what, o.x, o.y));
+          else builds.push(new Build(u.team, o.what, o.x, o.y));
+        }
+        u.work = 0; u.order = null;
+      }
+    }
+  }
+
+  // drive over the flag and it is yours
+  if (!flag.held && !u.carrying && Math.hypot(flag.x - u.x, flag.y - u.y) < u.r + 14){
+    flag.held = u; u.carrying = true;
+    talk(TEAM_NAME[u.team] + ' has the flag.');
+  }
+  if (u.carrying){
+    flag.x = u.x; flag.y = u.y;
+    const h = home[u.team];
+    if (Math.hypot(h.x - u.x, h.y - u.y) < h.r){
+      score[u.team]++; u.carrying = false; flag.held = null;
+      flag.x = WORLD_W / 2; flag.y = WORLD_H / 2;
+      paintScore();
+      if (score[u.team] >= WIN_AT){ winner = u.team; paused = true; }
+      else talk(TEAM_NAME[u.team] + ' scores.');
+    }
+  }
+
+  if (RESUPPLY && dist(u, home[u.team]) < home[u.team].r + 60){
+    u.bullets = Math.min(AMMO_BULLETS, u.bullets + 14 * dt);
+    u.grenades = Math.min(AMMO_GRENADES, u.grenades + 1.4 * dt);
+    if (u.kind === 'tank') u.missiles = Math.min(AMMO_TANK, u.missiles + 1.4 * dt);
+  }
+  collide(u, dt);
+}
+
+function stepBuild(b, dt){
+  if (b.kind === 'factory' && b.queue){
+    b.queue.left -= dt;
+    if (b.queue.left <= 0){
+      const dir = b.team === 'red' ? 1 : -1;
+      const u = new Unit(b.team, b.queue.what, b.x + dir * (b.r + 22), b.y + rnd(-20, 20));
+      // a vehicle from a run heads straight out on its route; the engineer stays home to build
+      if (b.queue.route && u.kind !== 'engineer'){
+        u.route = factoryRoute(b.team, b.queue.route); u.leg = 0; u.guard = false;
+      }
+      units.push(u);
+      if (b.queue.inRun && b.batch) b.batch.made++;
+      b.queue = null;
+      if (b.batch && b.batch.made >= b.batch.total){         // run finished: the factory pauses
+        b.lastRun = { kind: b.batch.kind, route: b.batch.route };
+        b.batch = null;
+        if (b.team === myTeam){
+          talk('Factory run finished. It is waiting for you.', 2600);
+          if (sel === b) openMenu(b);
+        }
+      }
+    }
+  }
+  // start the next vehicle of a run, as long as you are not at the vehicle limit
+  if (b.kind === 'factory' && !b.queue && b.batch && ants_cap(b.team)){
+    const tank = b.batch.kind === 'tank';
+    const what = tank ? 'tank' : b.batch.made >= BATCH_JEEPS ? 'engineer' : 'jeep';
+    const t = tank ? BUILD_TANK : BUILD_JEEP;
+    b.queue = { what, left: t, total: t, route: b.batch.route, inRun: true };
+  }
+  if (b.kind === 'artillery'){
+    if (b.off > 0){ b.off -= dt; if (b.off <= 0) b.rounds = ARTY_ROUNDS; }
+    else if (b.cool > 0) b.cool -= dt;
+    else if (b.order && b.rounds > 0){
+      fire(b, b.order.x, b.order.y, 'arty');
+      b.a = Math.atan2(b.order.y - b.y, b.order.x - b.x);
+      b.rounds--; b.cool = ARTY_RELOAD;
+      if (b.rounds <= 0){ b.off = ARTY_COOLOFF; b.order = null; }
+    }
+  }
+}
+
+/* The three routes a factory can send its vehicles on. Each is worked out from
+   your base and the flag's home in the middle of the map. Every vehicle gets a
+   slightly different line so a run doesn't drive nose to tail.
+   1: out to halfway between your base and the flag, then back to base.
+   2: out to just past the flag (it'll grab it if it's there), then back to base.
+   3: out to three quarters of the way to the flag, then circle there, guarding it. */
+function factoryRoute(team, n){
+  const b = home[team], fx = WORLD_W / 2, fy = WORLD_H / 2;
+  const toward = team === 'red' ? 1 : -1;
+  const at = t => ({ x: b.x + (fx - b.x) * t, y: b.y + (fy - b.y) * t });
+  const j = r => rnd(-r, r);
+  const keep = p => ({ x: clamp(p.x, 60, WORLD_W - 60), y: clamp(p.y, 60, WORLD_H - 60) });
+  // The factory sits right in front of the base, so the stop "back at base" is just
+  // above or below it. That way nothing has to squeeze past the factory, and a
+  // vehicle heads OUT first, straight from the factory door.
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const homeStop = keep({ x: b.x + toward * 25, y: b.y + side * rnd(62, 82) });
+  if (n === 1){
+    const m = at(0.75);                                 // three-quarters out, close enough to shoot near the flag
+    return [keep({ x: m.x, y: m.y + side * rnd(10, 75) }), homeStop];
+  }
+  if (n === 2){
+    return [keep({ x: fx + toward * 10 * FEET, y: fy + j(40) }), homeStop];
+  }
+  const c = at(0.75), r = 62, turn = rnd(0, TAU);
+  const ring = [];
+  for (let i = 0; i < 4; i++){
+    const a = turn + i * TAU / 4;
+    ring.push(keep({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r }));
+  }
+  return ring;
+}
+const ROUTE_NAME = { 1: 'most of the way and back', 2: 'past the flag and back', 3: 'guard near the flag' };
+
+/* The engineer's wall plans: a straight fence of barricades standing across the
+   line between the two bases, built from the middle outwards so the most useful
+   part goes up first.
+   Defence 1: in front of your own base, beyond the factory.
+   Defence 2: just past the flag, on the enemy's side. It stands between the
+   enemy and the flag, and between the flag and the enemy's base, so it slows
+   them down both coming and going. */
+// The engineer's ready-made wall: a fence of WALL_SIZE barricades in front of the base.
+function wallPlan(team){
+  const b = home[team], toward = team === 'red' ? 1 : -1;
+  const x = b.x + toward * WALL_BASE_AHEAD, y = WORLD_H / 2, gap = 36;
+  const spots = [];
+  for (let i = 0; spots.length < WALL_SIZE; i++){
+    const k = i === 0 ? 0 : (i % 2 ? -1 : 1) * Math.ceil(i / 2);   // 0, -1, +1, -2, +2 ...
+    spots.push({ x, y: clamp(y + k * gap, 50, WORLD_H - 50) });
+  }
+  return spots;
+}
+
+// Could any enemy vehicle shoot the engineer, either where it is or where it's going to build?
+function inDanger(u, spot){
+  for (const o of units){
+    if (o.dead || o.team === u.team || !o.range) continue;
+    // close enough that it would be the obvious target, or someone standing right on the spot
+    if (Math.hypot(o.x - u.x, o.y - u.y) < o.range * 0.7 + 20) return true;
+    if (Math.hypot(o.x - spot.x, o.y - spot.y) < 170) return true;
+  }
+  return false;
+}
+
+// Hand the engineer the next barricade of its wall plan, skipping any spot that is taken.
+function nextWallPiece(u){
+  while (u.plan.length){
+    const p = u.plan.shift();
+    const what = p.what || 'barricade';
+    if (roomFor(p.x, p.y, SPEC[what].r)){
+      u.order = { type: 'build', x: p.x, y: p.y, what, time: what === 'artillery' ? BUILD_ARTY : BUILD_BARRICADE };
+      u.work = 0;
+      return;
+    }
+  }
+  const was = u.planName || 'Wall';
+  u.plan = null; u.planName = null; u.guard = true;       // done: it heads back to guard home
+  if (u.team === myTeam){
+    talk(was + ' finished. The engineer is heading home.', 2400);
+    if (sel === u) openMenu(u);
+  }
+}
+
+// Stops a factory run from filling the whole map with vehicles.
+function ants_cap(team){
+  return units.filter(u => !u.dead && u.team === team).length < MAX_UNITS;
+}
+
+// Is there space here for something this big?
+function roomFor(x, y, r){
+  if (x < r + 30 || x > WORLD_W - r - 30 || y < r + 30 || y > WORLD_H - r - 30) return false;
+  for (const b of builds) if (!b.dead && Math.hypot(b.x - x, b.y - y) < b.r + r + 6) return false;
+  return true;
+}
+
+/* ---------------- drawing ---------------- */
+const COL = { red: '#c94238', blue: '#3b7ab5', yellow: '#e8c23a', green: '#46c46a' };
+const DARK = { red: '#7d251e', blue: '#1f4874', yellow: '#86690e', green: '#1c6a33' };
+
+function hpBar(o){
+  if (o.kind === 'base' || o.hp >= o.maxhp) return;
+  const w = o.r * 2, x = o.x - o.r, y = o.y - o.r - 8;
+  g.fillStyle = 'rgba(20,22,14,.7)'; g.fillRect(x, y, w, 3.5);
+  g.fillStyle = o.hp / o.maxhp > 0.35 ? '#9ec46a' : '#d8873c';
+  g.fillRect(x, y, w * Math.max(0, o.hp) / o.maxhp, 3.5);
+}
+
+function drawUnit(u){
+  const c = COL[u.team], d = DARK[u.team];
+  g.save(); g.translate(u.x, u.y);
+  g.fillStyle = 'rgba(25,28,16,.28)';                       // shadow on the ground
+  g.beginPath(); g.ellipse(2.5, 3.5, u.r * 0.95, u.r * 0.7, 0, 0, TAU); g.fill();
+  g.rotate(u.a);
+  if (u.kind === 'soldier'){
+    // seen from above: shoulders, a helmet, and a rifle held out in front
+    g.scale(1.25, 1.25);
+    g.fillStyle = d; g.beginPath(); g.ellipse(-0.5, 0, 3.4, 6, 0, 0, TAU); g.fill();
+    g.strokeStyle = d; g.lineWidth = 1.7; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(1, 3); g.lineTo(10, 3); g.stroke();
+    g.fillStyle = c; g.beginPath(); g.arc(0.8, 0, 3.7, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(20,22,14,.55)'; g.lineWidth = 0.9; g.stroke();
+  } else if (u.kind === 'tank'){
+    g.fillStyle = d; g.fillRect(-14, -12, 28, 5); g.fillRect(-14, 7, 28, 5);   // tracks
+    g.fillStyle = c; g.fillRect(-13, -8, 25, 16);                              // hull
+    g.fillStyle = d; g.fillRect(2, -2.2, 18, 4.4);                             // barrel
+    g.beginPath(); g.arc(-1, 0, 6.5, 0, TAU); g.fill();                        // turret
+  } else {
+    g.fillStyle = c; g.fillRect(-11, -7, 22, 14);                              // body
+    g.fillStyle = d; g.fillRect(-11, -8.5, 6, 17); g.fillRect(5, -8.5, 6, 17); // wheels
+    g.fillStyle = 'rgba(24,26,16,.55)'; g.fillRect(-3, -4.5, 7, 9);            // seats
+    if (u.kind === 'engineer'){                                                // engineer carries a shovel
+      g.strokeStyle = '#d8cf9e'; g.lineWidth = 2; g.beginPath();
+      g.moveTo(-6, -9.5); g.lineTo(6, -9.5); g.stroke();
+    } else {
+      g.fillStyle = d; g.fillRect(4, -1.4, 12, 2.8);                           // gun
+    }
+  }
+  g.restore();
+  if (u === sel || inGroup(u)){
+    const rr = Math.max(u.r + 7, 20 / cam.zoom);
+    g.strokeStyle = u === sel ? '#f0dda2' : '#e3c16a';
+    g.lineWidth = (u === sel ? 2.6 : 2.0) / cam.zoom; g.setLineDash([5 / cam.zoom, 5 / cam.zoom]);
+    g.beginPath(); g.arc(u.x, u.y, rr, 0, TAU); g.stroke(); g.setLineDash([]);
+  }
+  hpBar(u);
+}
+
+function drawBuild(b){
+  const c = COL[b.team], d = DARK[b.team];
+  g.save(); g.translate(b.x, b.y);
+  if (b.kind === 'barricade'){
+    // the X from the ants, grown up into a tank trap
+    g.strokeStyle = '#d9d2ad'; g.lineWidth = 5; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(-9, -9); g.lineTo(9, 9); g.moveTo(9, -9); g.lineTo(-9, 9); g.stroke();
+    g.strokeStyle = d; g.lineWidth = 2; g.stroke();
+  } else if (b.kind === 'artillery'){
+    g.fillStyle = 'rgba(25,28,16,.28)'; g.beginPath(); g.arc(2, 3, 13, 0, TAU); g.fill();
+    g.fillStyle = d; g.beginPath(); g.arc(0, 0, 12, 0, TAU); g.fill();
+    g.fillStyle = c; g.beginPath(); g.arc(0, 0, 8, 0, TAU); g.fill();
+    g.save(); g.rotate(b.a); g.fillStyle = d; g.fillRect(4, -2.5, 20, 5); g.restore();
+  } else if (b.kind === 'factory'){
+    g.fillStyle = 'rgba(25,28,16,.3)'; g.fillRect(-21, -15, 48, 42);
+    g.fillStyle = c; g.fillRect(-24, -18, 48, 40);
+    g.fillStyle = 'rgba(255,255,255,.22)';                             // saw-tooth roof lights
+    for (let i = -22; i < 22; i += 11){ g.beginPath(); g.moveTo(i, -18); g.lineTo(i + 5.5, -26); g.lineTo(i + 11, -18); g.fill(); }
+    g.strokeStyle = d; g.lineWidth = 2.5; g.strokeRect(-24, -18, 48, 40);
+    g.fillStyle = d; g.fillRect(-9, 4, 18, 18);                        // the door the vehicles come out of
+    g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(-9, 4, 18, 3);
+  } else {                                                             // base
+    g.fillStyle = 'rgba(25,28,16,.3)'; g.beginPath(); g.arc(2, 3, 33, 0, TAU); g.fill();
+    g.strokeStyle = c; g.lineWidth = 4; g.setLineDash([9, 7]);
+    g.beginPath(); g.arc(0, 0, 32, 0, TAU); g.stroke(); g.setLineDash([]);
+    g.fillStyle = d; g.beginPath(); g.arc(0, 0, 25, 0, TAU); g.fill();
+    g.fillStyle = c; g.beginPath(); g.arc(0, 0, 17, 0, TAU); g.fill();
+    g.strokeStyle = '#e8e2c8'; g.lineWidth = 2;                        // empty flagpole waiting for a flag
+    g.beginPath(); g.moveTo(0, 6); g.lineTo(0, -14); g.stroke();
+    g.strokeStyle = 'rgba(232,226,200,.5)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(1, -14); g.lineTo(10, -11); g.lineTo(1, -8); g.stroke();
+  }
+  g.restore();
+  if (b === sel || inGroup(b)){
+    const rr = Math.max(b.r + 8, 22 / cam.zoom);
+    g.strokeStyle = b === sel ? '#f0dda2' : '#e3c16a';
+    g.lineWidth = (b === sel ? 2.6 : 2.0) / cam.zoom; g.setLineDash([5 / cam.zoom, 5 / cam.zoom]);
+    g.beginPath(); g.arc(b.x, b.y, rr, 0, TAU); g.stroke(); g.setLineDash([]);
+  }
+  hpBar(b);
+  if (b.kind === 'factory' && b.queue){                                // build progress ring
+    const p = 1 - b.queue.left / b.queue.total;
+    g.strokeStyle = 'rgba(20,22,14,.55)'; g.lineWidth = 4;
+    g.beginPath(); g.arc(b.x, b.y, 32, 0, TAU); g.stroke();
+    g.strokeStyle = '#e3c16a';
+    g.beginPath(); g.arc(b.x, b.y, 32, -Math.PI / 2, -Math.PI / 2 + TAU * p); g.stroke();
+  }
+  if (b.kind === 'factory' && b.batch){                               // run counter, e.g. "3/6"
+    g.fillStyle = 'rgba(227,193,106,.95)'; g.textAlign = 'center';
+    g.font = '600 ' + Math.round(13 / cam.zoom) + 'px sans-serif';
+    g.fillText('R' + b.batch.route + '  ' + b.batch.made + '/' + b.batch.total, b.x, b.y - 38);
+  }
+  if (b.kind === 'artillery' && b.off > 0){
+    g.fillStyle = 'rgba(227,193,106,.85)'; g.textAlign = 'center';
+    g.font = Math.round(13 / cam.zoom) + 'px sans-serif';
+    g.fillText(Math.ceil(b.off) + 's', b.x, b.y - 22);
+  }
+}
+
+// the loop a unit walks, with its stops numbered in the order it visits them
+function drawRoute(pts, loop){
+  if (!pts.length) return;
+  if (pts.length > 1){
+    g.strokeStyle = 'rgba(227,193,106,.45)'; g.lineWidth = 1.8; g.setLineDash([7, 7]);
+    g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
+    if (loop) g.closePath();
+    g.stroke(); g.setLineDash([]);
+  }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const fs = Math.max(9, Math.round(12 / cam.zoom)), rr = Math.max(7, 9 / cam.zoom);
+  pts.forEach((p, i) => {
+    g.fillStyle = 'rgba(28,31,22,.82)'; g.beginPath(); g.arc(p.x, p.y, rr, 0, TAU); g.fill();
+    g.strokeStyle = '#e3c16a'; g.lineWidth = 1.4; g.stroke();
+    g.fillStyle = '#e3c16a'; g.font = fs + 'px sans-serif';
+    g.fillText(String(i + 1), p.x, p.y + 0.5);
+  });
+  g.textBaseline = 'alphabetic';
+}
+
+function drawFlag(){
+  flag.bob += 0.05;
+  const x = flag.x, y = flag.y - (flag.held ? 16 : 0);
+  g.save(); g.translate(x, y);
+  g.fillStyle = 'rgba(25,28,16,.3)'; g.beginPath(); g.ellipse(2, 4, 8, 5, 0, 0, TAU); g.fill();
+  g.strokeStyle = '#e8e2c8'; g.lineWidth = 2.4;
+  g.beginPath(); g.moveTo(0, 2); g.lineTo(0, -26); g.stroke();
+  g.fillStyle = '#e3c16a';
+  g.beginPath(); g.moveTo(1, -26);
+  g.quadraticCurveTo(11, -22 + Math.sin(flag.bob) * 2, 20, -25);
+  g.lineTo(20, -13); g.quadraticCurveTo(11, -10 + Math.sin(flag.bob) * 2, 1, -14);
+  g.closePath(); g.fill();
+  g.restore();
+}
+
+function drawOrderPin(o, col){
+  g.strokeStyle = col; g.lineWidth = 2; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(o.x - 7, o.y - 7); g.lineTo(o.x + 7, o.y + 7);
+  g.moveTo(o.x + 7, o.y - 7); g.lineTo(o.x - 7, o.y + 7); g.stroke();
+}
+
+function draw(){
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#181a13'; g.fillRect(0, 0, VW, VH);
+  g.save();
+  g.translate(VW / 2, VH / 2); g.scale(cam.zoom, cam.zoom); g.translate(-cam.x, -cam.y);
+  g.drawImage(mapCv, 0, 0);
+
+  // the range ring of every selected artillery piece, so you can see what a battery covers
+  const guns = group.length ? group.filter(o => o.kind === 'artillery') : (sel && sel.kind === 'artillery' ? [sel] : []);
+  if (guns.length){
+    g.strokeStyle = 'rgba(227,193,106,.28)'; g.lineWidth = 1.5; g.setLineDash([7, 7]);
+    for (const gun of guns){ g.beginPath(); g.arc(gun.x, gun.y, ARTY_RANGE * FEET, 0, TAU); g.stroke(); }
+    g.setLineDash([]);
+  }
+  if (sel && sel.order) drawOrderPin(sel.order, sel.order.type === 'move' ? '#e3c16a' : '#e08a52');
+  if (pending && pendAt && pending.type !== 'route') drawOrderPin(pendAt, '#e3c16a');
+  if (sel && sel.route) drawRoute(sel.route, true);
+  if (pending && pending.type === 'wall' && pending.pts.length === 1 && pendAt){
+    g.strokeStyle = 'rgba(227,193,106,.6)'; g.lineWidth = 2 / cam.zoom; g.setLineDash([6 / cam.zoom, 6 / cam.zoom]);
+    g.beginPath(); g.moveTo(pending.pts[0].x, pending.pts[0].y); g.lineTo(pendAt.x, pendAt.y); g.stroke(); g.setLineDash([]);
+  }
+  if (pending && pending.type === 'artyrow' && pending.pts.length === 1 && pendAt){
+    g.strokeStyle = 'rgba(227,193,106,.6)'; g.lineWidth = 2 / cam.zoom; g.setLineDash([6 / cam.zoom, 6 / cam.zoom]);
+    g.beginPath(); g.moveTo(pending.pts[0].x, pending.pts[0].y); g.lineTo(pendAt.x, pendAt.y); g.stroke(); g.setLineDash([]);
+    for (const p of artyRowSpots(pending.pts[0], pendAt)){
+      g.beginPath(); g.arc(p.x, p.y, SPEC.artillery.r, 0, Math.PI * 2); g.stroke();
+    }
+  }
+  if (sel && sel.plan){                                   // ghost Xs where the wall still has to go
+    g.strokeStyle = 'rgba(227,193,106,.55)'; g.lineWidth = 2 / cam.zoom; g.lineCap = 'round';
+    const spots = sel.plan.slice();
+    if (sel.order && sel.order.type === 'build') spots.push(sel.order);
+    for (const p of spots){
+      g.beginPath(); g.moveTo(p.x - 7, p.y - 7); g.lineTo(p.x + 7, p.y + 7);
+      g.moveTo(p.x + 7, p.y - 7); g.lineTo(p.x - 7, p.y + 7); g.stroke();
+    }
+  }
+  if (pending && pending.type === 'route') drawRoute(pending.pts, false);
+  if (pending && pending.type === 'shell-multi'){
+    // Draw circles at each selected target
+    g.strokeStyle = 'rgba(224, 138, 82, 0.8)';  // orange, like fire
+    g.lineWidth = 3 / cam.zoom;
+    for (const pt of pending.pts){
+      g.beginPath(); g.arc(pt.x, pt.y, 30, 0, Math.PI * 2); g.stroke();
+    }
+    // Draw a preview circle at current cursor if hovering
+    if (pendAt && pending.pts.length < group.length + 1){  // allow up to guncount + 1 targets
+      g.strokeStyle = 'rgba(224, 138, 82, 0.4)';  // dimmer
+      g.beginPath(); g.arc(pendAt.x, pendAt.y, 30, 0, Math.PI * 2); g.stroke();
+    }
+  }
+
+  for (const b of builds) if (!b.dead) drawBuild(b);
+  drawFlag();
+  for (const u of units) if (!u.dead) drawUnit(u);
+
+  for (const s of shots){
+    if (s.kind === 'bullet'){
+      g.strokeStyle = 'rgba(245,228,170,.9)'; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - Math.cos(s.a) * 9, s.y - Math.sin(s.a) * 9); g.stroke();
+    } else {
+      g.fillStyle = s.kind === 'grenade' ? '#6d7a4a' : '#3a3d2c';
+      g.beginPath(); g.arc(s.x, s.y, s.kind === 'missile' ? 3.4 : 4.2, 0, TAU); g.fill();
+    }
+  }
+  for (const b of bursts){
+    const p = b.t / 0.45, r = (b.big ? 34 : 11) * (0.35 + p);
+    g.fillStyle = 'rgba(240,200,120,' + (1 - p) * 0.75 + ')';
+    g.beginPath(); g.arc(b.x, b.y, r, 0, TAU); g.fill();
+  }
+  g.restore();
+
+  if (winner){
+    g.fillStyle = 'rgba(24,26,19,.72)'; g.fillRect(0, 0, VW, VH);
+    g.fillStyle = COL[winner]; g.textAlign = 'center';
+    g.font = '600 46px Jost, Avenir Next, sans-serif';
+    g.fillText(TEAM_NAME[winner] + ' wins', VW / 2, VH / 2 - 6);
+    g.fillStyle = '#e3c16a'; g.font = '16px Jost, Avenir Next, sans-serif';
+    g.fillText('New game to play again', VW / 2, VH / 2 + 28);
+  }
+}
+
+/* ---------------- giving orders ---------------- */
+let sel = null;            // the unit or building the menu is drawn from
+let group = [];            // every unit an order will apply to (vehicles only; buildings are always solo)
+const inGroup = o => group.indexOf(o) >= 0;
+const GROUPABLE = ['jeep', 'tank', 'artillery'];   // engineers are deliberately left out: they never group
+function setSolo(o){ sel = o; group = o && GROUPABLE.indexOf(o.kind) >= 0 ? [o] : []; }
+function clearSel(){ sel = null; group = []; closeMenu(); }
+// Select every one of your artillery pieces in the same half of the map as the one clicked.
+// Top half (y in the upper part) is one battery, bottom half the other.
+function selectBattery(gun){
+  const topHalf = gun.y < WORLD_H / 2;
+  group = builds.filter(b => !b.dead && b.kind === 'artillery' && b.team === gun.team
+                             && (b.y < WORLD_H / 2) === topHalf);
+  if (group.indexOf(gun) < 0) group.push(gun);
+  sel = gun;
+}
+function addToGroup(o){
+  if (inGroup(o)){ if (group.length > 1){ group = group.filter(x => x !== o); if (sel === o) sel = group[0]; } return; }
+  group.push(o); sel = o;
+}
+// the orders a whole group can share: only what every member can do
+function groupCan(type){
+  if (!group.length) return false;
+  if (type === 'grenade') return group.every(u => u.kind === 'jeep');
+  if (type === 'attack')  return group.every(u => u.ammo >= 1);
+  if (type === 'shell')   return group.every(u => u.kind === 'artillery');
+  return group.every(u => GROUPABLE.indexOf(u.kind) >= 0 && u.kind !== 'artillery');
+}
+// After a group gets its order it stops being a group. Next time you click one of
+// those units it is on its own again, free to join a brand-new group.
+function disband(){ group = []; }
+let pending = null;        // the order you picked, waiting for you to click a spot
+let pendAt = null;
+
+function talk(msg, ms){
+  say.textContent = msg; say.classList.add('open');
+  clearTimeout(talk.t); talk.t = setTimeout(() => say.classList.remove('open'), ms || 1800);
+}
+function paintScore(){
+  el('sr').textContent = score.red; el('sb').textContent = score.blue;
+  el('sy').textContent = score.yellow; el('sg').textContent = score.green;
+}
+function closeMenu(){ orders.innerHTML = ''; }
+
+function mine(o){ return o && !o.dead && o.team === myTeam; }
+
+/* Finds what you tapped. "grab" is how many extra screen pixels count as a hit,
+   so a finger gets a generous target and a mouse a tight one. It takes the
+   closest thing, and leans toward your own units, so a tap near a moving jeep
+   still picks the jeep. */
+function pickAt(wx, wy, grab){
+  const pad = (grab || 6) / cam.zoom;
+  let best = null, bd = Infinity;
+  for (const o of [...units, ...builds]){
+    if (o.dead) continue;
+    const reach = o.r + pad;
+    const d = Math.hypot(o.x - wx, o.y - wy);
+    if (d > reach) continue;
+    const rank = d - (mine(o) ? reach * 0.6 : 0);
+    if (rank < bd){ bd = rank; best = o; }
+  }
+  return best;
+}
+
+function row(label, cost, fn, off){
+  const b = document.createElement('button');
+  b.innerHTML = label + (cost ? '<span class="cost">' + cost + '</span>' : '');
+  if (off) b.disabled = true; else b.onclick = e => { e.stopPropagation(); fn(); };
+  orders.appendChild(b);
+  return b;
+}
+function openMenu(o, sub){
+  orders.innerHTML = '';
+  const many = group.length > 1;
+  if (many){
+    if (group.every(u => u.kind === 'artillery')){          // a battery of guns, all firing the same spot
+      row('Shell this spot', group.length + ' guns', () => arm('shell'), !groupCan('shell'));
+      row('Shell multiple targets', 'one spot per gun', armMultiShell, !groupCan('shell'));
+    } else {
+      row('Drive here', group.length + ' units', () => arm('move'), !groupCan('move'));
+      row('Fire here', '', () => arm('attack'), !groupCan('attack'));
+      if (group.some(u => u.kind === 'jeep')) row('Throw grenade', '', () => arm('grenade'), !groupCan('grenade'));
+      row('Patrol route', 'all together', armRoute, !groupCan('move'));
+      if (group.some(u => u.route)) row('Stop patrolling', '', () => { for (const u of group) u.route = null; openMenu(o); });
+    }
+    row('Clear selection', '', clearSel);
+    return;
+  }
+  if (o.kind === 'jeep' || o.kind === 'tank'){
+    row('Drive here', '', () => arm('move'));
+    row('Fire here', '', () => arm('attack'), o.ammo < 1);
+    if (o.kind === 'jeep') row('Throw grenade', o.grenades + ' left', () => arm('grenade'), o.grenades < 1);
+    if (o.route) row('Stop patrolling', o.route.length + ' stops', () => { o.route = null; openMenu(o); });
+    else row('Patrol route', o.kind === 'tank' ? 'stops to fight' : 'shoots on the move', armRoute);
+    row('Add more (click another unit)', '', null, true).className = 'go';
+  } else if (o.kind === 'engineer' && sub === 'walls'){
+    row('Wall at base', WALL_SIZE + ' barricades', () => {
+      o.plan = wallPlan(o.team); o.planName = 'Wall'; o.order = null; o.work = 0; o.guard = false;
+      talk('Engineer is building a wall in front of the base.', 2400);
+      disband(); openMenu(o);
+    });
+    row('Draw a wall (pick 2 spots)', MANUAL_WALL + ' barricades', armManualWall);
+    row('Back', '', () => openMenu(o));
+  } else if (o.kind === 'engineer'){
+    row('Drive here', '', () => arm('move'));
+    row('Build barricade', BUILD_BARRICADE + 's', () => armBuild('barricade'));
+    row('Build artillery', BUILD_ARTY + 's', () => armBuild('artillery'));
+    if (!o.plan) row('Row of artillery (pick 2 spots)', 'up to ' + ARTY_ROW_MAX, armArtyRow);
+    row('Build factory', BUILD_FACTORY + 's', () => armBuild('factory'));
+    const building = o.order && o.order.type === 'build' ? 1 : 0;
+    if (o.plan) row(o.planName === 'Gun row' ? 'Stop the gun row' : 'Stop the wall', (o.plan.length + building) + ' left', () => {
+      o.plan = null; o.order = null; o.work = 0; openMenu(o);
+    });
+    else row('Wall plans', '', () => openMenu(o, 'walls'));
+  } else if (o.kind === 'factory' && sub){
+    // second step: which route should the run use
+    const tank = sub === 'tank';
+    for (const n of [1, 2, 3]){
+      row('Route ' + n + ': ' + ROUTE_NAME[n], '', () => startRun(o, sub, n));
+    }
+    row('Back', '', () => openMenu(o));
+  } else if (o.kind === 'factory'){
+    const busy = !!o.queue || !!o.batch;
+    if (o.batch){
+      const kind = o.batch.kind === 'tank' ? 'Tanks' : 'Jeeps';
+      row(kind + ' on route ' + o.batch.route + ': ' + o.batch.made + ' of ' + o.batch.total, '', null, true).className = 'go';
+      row('Stop the run', '', () => {
+        o.batch = null;
+        talk('Run stopped. The one being built will still come out.');
+        openMenu(o);
+      });
+    } else {
+      row('Jeep run', BATCH_JEEPS + ' + engineer', () => openMenu(o, 'jeep'), busy);
+      row('Tank run', BATCH_TANKS + ' tanks', () => openMenu(o, 'tank'), busy);
+      if (o.lastRun) row('Run again: ' + (o.lastRun.kind === 'tank' ? 'tanks' : 'jeeps') + ' route ' + o.lastRun.route, '',
+                         () => startRun(o, o.lastRun.kind, o.lastRun.route), busy);
+      row('One jeep', BUILD_JEEP + 's', () => queueUp(o, 'jeep', BUILD_JEEP), busy);
+      row('One tank', BUILD_TANK + 's', () => queueUp(o, 'tank', BUILD_TANK), busy);
+    }
+    if (o.queue) row('Working on a ' + o.queue.what + '...', Math.ceil(o.queue.left) + 's', null, true);
+  } else if (o.kind === 'artillery'){
+    const ready = o.off <= 0 && o.rounds > 0;
+    row('Shell this spot', o.rounds + ' rounds', () => arm('shell'), !ready);
+    if (o.off > 0) row('Cooling off', Math.ceil(o.off) + 's', null, true);
+    row('Add more (click another gun)', '', null, true).className = 'go';
+  } else {
+    row('Nothing to order here', '', null, true);
+  }
+  if (o.order) row('Cancel order', '', () => { o.order = null; o.work = 0; openMenu(o); });
+  if (!sub && !many) row('Done', '', clearSel);   // the route picker has Back instead
+}
+
+function arm(type){
+  pending = { type }; pendAt = null; closeMenu();
+  row('Now click the spot on the map', '', () => { pending = null; openMenu(sel); }).className = 'go';
+  talk(type === 'move' ? 'Click where it should drive.'
+     : type === 'grenade' ? 'Click what to throw the grenade at.'
+     : 'Click the spot to fire at.');
+}
+function armRoute(){
+  pending = { type: 'route', pts: [] }; pendAt = null; closeMenu();
+  routeButtons();
+}
+// Draw a wall: you click two spots, the engineer lays MANUAL_WALL barricades evenly between them.
+function armManualWall(){
+  pending = { type: 'wall', pts: [] }; pendAt = null; closeMenu();
+  wallButtons();
+}
+// Shell multiple targets: you click two or more spots, closest gun fires closest target, next gun fires next target, etc.
+function armMultiShell(){
+  pending = { type: 'shell-multi', pts: [] }; pendAt = null; closeMenu();
+  shellMultiButtons();
+}
+function shellMultiButtons(){
+  orders.innerHTML = '';
+  const n = pending.pts.length;
+  row(n === 0 ? 'Click the first target' : 'Click target ' + (n + 1), '', null, true).className = 'go';
+  if (n >= 2) row('Fire all targets', n + ' targets, ' + group.length + ' guns', () => finishMultiShell());
+  row('Cancel', '', () => { pending = null; openMenu(sel); });
+}
+function wallButtons(){
+  orders.innerHTML = '';
+  row(pending.pts.length === 0 ? 'Click one end of the wall' : 'Click the other end', '', null, true).className = 'go';
+  row('Cancel', '', () => { pending = null; openMenu(sel); });
+}
+// Row of artillery: click two spots; guns go ARTY_GAP apart from the first spot toward the second,
+// as many as fit, up to ARTY_ROW_MAX.
+function armArtyRow(){
+  pending = { type: 'artyrow', pts: [] }; pendAt = null; closeMenu();
+  artyRowButtons();
+}
+function artyRowButtons(){
+  orders.innerHTML = '';
+  row(pending.pts.length === 0 ? 'Click where the first gun goes' : 'Click the other end of the row', '', null, true).className = 'go';
+  row('Cancel', '', () => { pending = null; openMenu(sel); });
+}
+function artyRowSpots(a, c){
+  const len = Math.hypot(c.x - a.x, c.y - a.y);
+  const n = clamp(Math.floor(len / ARTY_GAP) + 1, 1, ARTY_ROW_MAX);
+  const ux = len ? (c.x - a.x) / len : 0, uy = len ? (c.y - a.y) / len : 0;
+  const spots = [];
+  for (let i = 0; i < n; i++) spots.push({ x: clamp(a.x + ux * ARTY_GAP * i, 45, WORLD_W - 45),
+                                          y: clamp(a.y + uy * ARTY_GAP * i, 45, WORLD_H - 45), what: 'artillery' });
+  return spots;
+}
+function finishArtyRow(a, c){
+  if (!sel || sel.dead){ pending = null; return; }
+  const spots = artyRowSpots(a, c);
+  sel.plan = spots; sel.planName = 'Gun row'; sel.order = null; sel.work = 0; sel.guard = false;
+  talk('Engineer is building a row of ' + spots.length + ' artillery.', 2400);
+  pending = null; disband(); openMenu(sel);
+}
+function finishManualWall(a, c){
+  if (!sel || sel.dead){ pending = null; return; }
+  const spots = [];
+  for (let i = 0; i < MANUAL_WALL; i++){
+    const t = MANUAL_WALL === 1 ? 0.5 : i / (MANUAL_WALL - 1);
+    spots.push({ x: clamp(a.x + (c.x - a.x) * t, 40, WORLD_W - 40),
+                 y: clamp(a.y + (c.y - a.y) * t, 40, WORLD_H - 40) });
+  }
+  sel.plan = spots; sel.planName = 'Wall'; sel.order = null; sel.work = 0; sel.guard = false;
+  talk('Engineer is drawing a wall of ' + MANUAL_WALL + ' barricades.', 2400);
+  pending = null; disband(); openMenu(sel);
+}
+function finishMultiShell(){
+  if (!sel || !pending || pending.pts.length < 2){ pending = null; if (sel) openMenu(sel); return; }
+  const targets = pending.pts.slice();
+  const guns = orderTargets().filter(u => u.kind === 'artillery');
+  
+  // Pair them up: the closest gun/target pair first, then the next closest, and so on.
+  // If there are more guns than targets, the spare guns double up on their nearest target.
+  const reach = ARTY_RANGE * FEET;
+  const free = guns.slice();
+  let open = targets.slice();
+  while (free.length){
+    if (!open.length) open = targets.slice();
+    let bg = 0, bt = 0, bd = Infinity;
+    for (let i = 0; i < free.length; i++) for (let j = 0; j < open.length; j++){
+      const d = Math.hypot(open[j].x - free[i].x, open[j].y - free[i].y);
+      if (d < bd){ bd = d; bg = i; bt = j; }
+    }
+    const gun = free.splice(bg, 1)[0], target = open.splice(bt, 1)[0];
+    if (bd <= reach) gun.order = { x: target.x, y: target.y };      // in range: lands on the spot
+    else {                                                         // out of range: lands short
+      const t = reach / bd;
+      gun.order = { x: gun.x + (target.x - gun.x) * t, y: gun.y + (target.y - gun.y) * t };
+    }
+  }
+
+  talk(guns.length + ' guns, ' + targets.length + ' targets. Guns assigned by range.', 2400);
+  pending = null;
+  disband();
+  openMenu(sel);
+}
+function routeButtons(){
+  orders.innerHTML = '';
+  const n = pending.pts.length;
+  row(n === 0 ? 'Click the first stop on the map'
+    : n === 1 ? 'Click the second stop'
+    : 'Click the last stop', '', null, true).className = 'go';
+  if (n >= 2) row('Start the route', n + ' stops', () => finishRoute());
+  row('Cancel', '', () => { pending = null; openMenu(sel); });
+}
+function finishRoute(){
+  if (!sel || !pending || pending.pts.length < 2){ pending = null; if (sel) openMenu(sel); return; }
+  const pts = pending.pts.slice(), tg = orderTargets();
+  for (const u of tg){ u.route = pts.slice(); u.leg = 0; u.order = null; u.guard = false; }
+  pending = null;
+  talk(tg.length > 1 ? tg.length + ' units patrolling together.' : 'Patrolling ' + pts.length + ' stops.');
+  disband();
+  openMenu(sel);
+}
+// who an order applies to: the whole group if there is one, otherwise just sel
+function orderTargets(){ return group.length ? group.slice() : (sel ? [sel] : []); }
+
+function armBuild(what){
+  const time = what === 'barricade' ? BUILD_BARRICADE : what === 'artillery' ? BUILD_ARTY
+             : what === 'jeep' ? BUILD_JEEP : BUILD_FACTORY;
+  pending = { type: 'build', what, time }; pendAt = null; closeMenu();
+  row('Now click where the ' + what + ' goes', '', () => { pending = null; openMenu(sel); }).className = 'go';
+  talk('Click where to build the ' + what + '.');
+}
+function startRun(f, kind, route){
+  f.batch = { kind, route, made: 0, total: kind === 'tank' ? BATCH_TANKS : BATCH_JEEPS + 1 };
+  talk((kind === 'tank' ? BATCH_TANKS + ' tanks' : BATCH_JEEPS + ' jeeps and an engineer')
+       + ' on route ' + route + ': ' + ROUTE_NAME[route] + '.', 2600);
+  openMenu(f);
+}
+function queueUp(f, what, time){
+  f.queue = { what, left: time, total: time };
+  openMenu(f); talk('Factory started a ' + what + '.');
+}
+
+// A new base or factory has to stay on your own half of the map.
+function ownHalf(team, x){ return team === 'red' ? x < WORLD_W / 2 : x > WORLD_W / 2; }
+
+function giveOrder(wx, wy){
+  // a route is built up one stop at a time, so it does not finish on the first click
+  if (pending && pending.type === 'route'){
+    if (!sel || sel.dead){ pending = null; return; }
+    pending.pts.push({ x: wx, y: wy });
+    if (pending.pts.length >= ROUTE_POINTS) finishRoute(); else routeButtons();
+    return;
+  }
+  // a drawn wall takes exactly two clicks: the two ends
+  if (pending && pending.type === 'wall'){
+    if (!sel || sel.dead){ pending = null; return; }
+    pending.pts.push({ x: wx, y: wy });
+    if (pending.pts.length >= 2) finishManualWall(pending.pts[0], pending.pts[1]); else wallButtons();
+    return;
+  }
+  // a row of artillery takes two clicks: the first gun, then which way and how far
+  if (pending && pending.type === 'artyrow'){
+    if (!sel || sel.dead){ pending = null; return; }
+    pending.pts.push({ x: wx, y: wy });
+    if (pending.pts.length >= 2) finishArtyRow(pending.pts[0], pending.pts[1]); else artyRowButtons();
+    return;
+  }
+  // multi-target shelling: click as many targets as you want, then click "Fire all targets"
+  if (pending && pending.type === 'shell-multi'){
+    if (!sel || sel.dead){ pending = null; return; }
+    pending.pts.push({ x: wx, y: wy });
+    const guns = orderTargets().filter(u => u.kind === 'artillery').length;
+    if (pending.pts.length >= guns) finishMultiShell();   // one target per gun: fire straight away
+    else shellMultiButtons();
+    return;
+  }
+  const p = pending; pending = null; pendAt = null;
+  if (!sel || sel.dead) return;
+  if (p.type === 'shell'){                               // every selected gun fires the same spot
+    let short = false;
+    for (const gun of orderTargets()){
+      if (gun.kind !== 'artillery') continue;
+      const d = Math.hypot(wx - gun.x, wy - gun.y), reach = ARTY_RANGE * FEET;
+      if (d <= reach){
+        gun.order = { x: wx, y: wy };                    // in range: lands on the spot
+      } else {
+        // out of range: the shell lands as far as the gun can throw, short of the target
+        const t = reach / d;
+        gun.order = { x: gun.x + (wx - gun.x) * t, y: gun.y + (wy - gun.y) * t };
+        short = true;
+      }
+    }
+    if (short) talk('Guns too far will land as close as they can reach.', 2200);
+    disband();
+    return;
+  }
+  if (p.type === 'build'){                               // building is always solo
+    if (p.what === 'factory' && !ownHalf(sel.team, wx)){ talk('A new factory has to stay on your own half.'); return; }
+    if (!roomFor(wx, wy, SPEC[p.what].r)){ talk('No room there.'); return; }
+    sel.order = { type: 'build', x: wx, y: wy, what: p.what, time: p.time }; sel.work = 0;
+    disband();
+    return;
+  }
+  // move / fire / grenade: the whole group obeys. They fan out a little so they don't stack.
+  const tg = orderTargets(), spread = tg.length > 1;
+  tg.forEach((u, i) => {
+    u.guard = false;
+    let ox = 0, oy = 0;
+    if (spread && p.type === 'move'){ const a = i / tg.length * TAU; ox = Math.cos(a) * 26; oy = Math.sin(a) * 26; }
+    u.order = { type: p.type, x: wx + ox, y: wy + oy };
+  });
+  disband();                                            // the group has done its job; the units are singles again
+}
+
+/* ---------------- mouse ---------------- */
+let drag = null;
+/* After a tap, a touch screen also fires pretend mouse events. Those would run
+   the selection a second time with the small mouse-sized target and throw the
+   selection away, so anything shortly after a touch is ignored. */
+let lastTouch = -9999;
+const fromTouch = () => performance.now() - lastTouch < 700;
+
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+cv.addEventListener('mousedown', e => {
+  if (e.button === 1 || fromTouch()) return;
+  drag = { sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y, moved: false, btn: e.button };
+});
+cv.addEventListener('mousemove', e => {
+  if (fromTouch()) return;
+  const wx = s2wx(e.clientX), wy = s2wy(e.clientY - cv.getBoundingClientRect().top);
+  if (pending) pendAt = { x: wx, y: wy };
+  if (!drag) return;
+  if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 5){
+    drag.moved = true;
+    cam.x = drag.cx - (e.clientX - drag.sx) / cam.zoom;
+    cam.y = drag.cy - (e.clientY - drag.sy) / cam.zoom;
+    clampCam();
+  }
+});
+addEventListener('mouseup', e => {
+  if (!drag || fromTouch()) return;
+  const d = drag; drag = null;
+  if (d.moved) return;
+  const top = cv.getBoundingClientRect().top;
+  const wx = s2wx(e.clientX), wy = s2wy(e.clientY - top);
+  const hit = pickAt(wx, wy, 9);
+
+  if (d.btn === 2){                                   // right button
+    if (hit && mine(hit) && hit.kind === 'jeep'){ setSolo(hit); arm('grenade'); }
+    else if (sel && mine(sel) && sel.kind === 'engineer' && !hit){ openMenu(sel); }
+    else { pending = null; clearSel(); say.classList.remove('open'); }
+    return;
+  }
+  clickSelect(hit, wx, wy);
+});
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  cam.zoom = clamp(cam.zoom * (e.deltaY < 0 ? 1.12 : 0.89), fitZoom(), 2.2);
+  clampCam();
+}, { passive: false });
+
+// finger control, so it works on the tablet too
+cv.addEventListener('touchstart', e => {
+  lastTouch = performance.now();
+  const t = e.touches[0];
+  drag = { sx: t.clientX, sy: t.clientY, cx: cam.x, cy: cam.y, moved: false, btn: 0 };
+}, { passive: true });
+cv.addEventListener('touchmove', e => {
+  lastTouch = performance.now();
+  if (!drag) return;
+  const t = e.touches[0];
+  if (Math.hypot(t.clientX - drag.sx, t.clientY - drag.sy) > 6){
+    drag.moved = true;
+    cam.x = drag.cx - (t.clientX - drag.sx) / cam.zoom;
+    cam.y = drag.cy - (t.clientY - drag.sy) / cam.zoom;
+    clampCam();
+  }
+}, { passive: true });
+cv.addEventListener('touchend', e => {
+  lastTouch = performance.now();
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.moved) return;
+  const top = cv.getBoundingClientRect().top;
+  const wx = s2wx(d.sx), wy = s2wy(d.sy - top);
+  const hit = pickAt(wx, wy, 34);        // fingers are much bigger than a mouse pointer
+  clickSelect(hit, wx, wy);
+}, { passive: true });
+
+/* One tap or click: give an order if one is armed, add a unit to the group,
+   pick a new single unit or building, or clear the selection on empty ground. */
+function clickSelect(hit, wx, wy){
+  if (pending){
+    const multi = pending.type === 'route' || pending.type === 'wall' || pending.type === 'shell-multi' || pending.type === 'artyrow';
+    giveOrder(wx, wy);
+    if (!multi){ if (sel) openMenu(sel); else closeMenu(); }
+    return;
+  }
+  if (hit && mine(hit) && hit.kind === 'engineer'){   // engineers are always solo -- their jobs are solo jobs
+    setSolo(hit); openMenu(sel);
+  } else if (hit && mine(hit) && hit.kind === 'artillery'){
+    // click one gun and the whole battery in that half of the map (top or bottom) comes with it.
+    // click a gun already in the group to drop just that one; click one in the other half to switch batteries.
+    if (inGroup(hit)) addToGroup(hit);
+    else selectBattery(hit);
+    openMenu(sel);
+  } else if (hit && mine(hit) && GROUPABLE.indexOf(hit.kind) >= 0){
+    // vehicles: grow the group while one is being assembled and the family matches
+    const cur = group.length ? group[0].kind : null;
+    const family = k => k === 'artillery' ? 'gun' : k === 'engineer' ? 'engineer' : 'vehicle';
+    const sameFamily = cur && family(hit.kind) === family(cur);
+    if (sameFamily) addToGroup(hit);
+    else setSolo(hit);
+    openMenu(sel);
+  } else if (hit && mine(hit)){                        // any other building: always on its own
+    setSolo(hit); sel = hit; openMenu(hit);
+  } else if (hit && (hit.kind === 'base') && FOOT.indexOf(hit.team) >= 0){
+    footBoost(hit.team);                               // tap a yellow/green base for reinforcements
+  } else {
+    clearSel();                                        // empty ground clears the selection
+  }
+}
+
+/* ---------------- the computer player ---------------- */
+/* A first pass, deliberately simple. It does three jobs: keep a wall of
+   barricades in front of its base, keep both factories busy, and send
+   everything it is not using at the flag. */
+let aiClock = 0;
+function runAI(team, dt){
+  aiClock -= dt;
+  if (aiClock > 0) return;
+  aiClock = D().think;
+
+  const mineU = units.filter(u => !u.dead && u.team === team);
+  const mineB = builds.filter(b => !b.dead && b.team === team);
+  const base = home[team];
+  if (!base) return;
+  const dir = team === 'red' ? 1 : -1;
+
+  // 1. keep the factories working
+  for (const f of mineB){
+    if (f.kind !== 'factory' || f.queue) continue;
+    if (mineU.length >= D().units) continue;                  // an easier computer keeps a smaller army
+    const tanks = mineU.filter(u => u.kind === 'tank').length;
+    const jeeps = mineU.filter(u => u.kind === 'jeep').length;
+    const want = (tanks < D().tanks || jeeps >= 4) ? 'tank' : 'jeep';
+    const t = (want === 'tank' ? BUILD_TANK : BUILD_JEEP) * D().build;
+    f.queue = { what: want, left: t, total: t };
+  }
+
+  // 2. the engineer walls off the approach to the base, then adds artillery
+  const eng = mineU.find(u => u.kind === 'engineer');
+  if (eng && !eng.order){
+    const walls = mineB.filter(b => b.kind === 'barricade' && Math.hypot(b.x - base.x, b.y - base.y) < 230).length;
+    const guns  = mineB.filter(b => b.kind === 'artillery').length;
+    let spot = null, what = null;
+    const wallsFirst = Math.min(5, D().walls);           // a short fence, then a gun, then the rest
+    if (guns < D().guns && walls >= wallsFirst && (guns + 1) * 4 <= walls){
+      what = 'artillery';
+      for (const dy of [-95, 95, -150, 150, -205, 205]){
+        const t = { x: base.x + dir * 60, y: base.y + dy };
+        if (roomFor(t.x, t.y, SPEC.artillery.r)){ spot = t; break; }
+      }
+    }
+    if (!spot && walls < D().walls){
+      what = 'barricade';
+      // a fence across the open side of the base; try each gap until one is free
+      for (let i = 0; i < 9 && !spot; i++){
+        const a = -1.05 + ((walls + i) % 9) * 0.26 + (i > 8 ? 0.13 : 0);
+        const t = { x: base.x + dir * Math.cos(a) * 185, y: base.y + Math.sin(a) * 185 };
+        if (roomFor(t.x, t.y, SPEC.barricade.r)) spot = t;
+      }
+    }
+    if (spot && roomFor(spot.x, spot.y, SPEC[what].r)){
+      eng.order = { type: 'build', x: spot.x, y: spot.y, what,
+                    time: what === 'barricade' ? BUILD_BARRICADE : BUILD_ARTY };
+      eng.work = 0;
+    }
+  }
+
+  // 3. artillery shells whatever enemy has come within reach
+  for (const gun of mineB){
+    if (gun.kind !== 'artillery' || gun.order || gun.off > 0 || gun.rounds <= 0) continue;
+    const t = nearestEnemy(gun, team, ARTY_RANGE * FEET, false);
+    if (t) gun.order = { x: t.x, y: t.y };
+  }
+
+  // 4. everyone else goes for the flag, and keeps one jeep back on guard
+  const fighters = mineU.filter(u => u.kind !== 'engineer');
+  const thief = flag.held && flag.held.team !== team ? flag.held : null;
+  fighters.forEach((u, i) => {
+    if (u.carrying){ u.order = null; return; }              // it heads home on its own
+    if (thief){ u.order = { type: 'move', x: thief.x, y: thief.y }; return; }   // chase the carrier
+    if (i === 0 && fighters.length > 2){ u.order = null; return; }   // this one stays and patrols
+    if (u.order && u.order.type === 'move' && Math.hypot(u.order.x - flag.x, u.order.y - flag.y) < 60) return;
+    // shoot a barricade out of the way if one is right in the path
+    const wall = builds.find(b => !b.dead && b.kind === 'barricade' && b.team !== team
+                                  && Math.hypot(b.x - u.x, b.y - u.y) < u.range * 0.8);
+    u.order = wall ? { type: 'attack', x: wall.x, y: wall.y }
+                   : { type: 'move', x: flag.x, y: flag.y };
+  });
+}
+
+/* ---------------- the foot armies ---------------- */
+/* Yellow and green are always played by the computer. They get no vehicles and
+   build nothing: every so often a wave of soldiers marches out of their base.
+   They go for the flag, chase whoever has it, and escort their own carrier home.
+   Everyone else is their enemy, including each other. */
+let waveClock = { yellow: 1, green: 1 }, footThink = 0, reinforceClock = REINFORCE_EVERY;
+
+// Drop a clutch of soldiers around a base (a wave, a base tap, or the 60s timer).
+function spawnSoldiers(team, n){
+  const base = home[team];
+  if (!base) return 0;
+  const have = units.filter(u => !u.dead && u.team === team).length;
+  n = Math.min(n, SOLDIER_MAX - have);
+  const face = Math.atan2(WORLD_H / 2 - base.y, WORLD_W / 2 - base.x);
+  for (let i = 0; i < n; i++){
+    const a = face + (i - (n - 1) / 2) * 0.45;
+    units.push(new Unit(team, 'soldier', base.x + Math.cos(a) * 48, base.y + Math.sin(a) * 48));
+  }
+  return n;
+}
+// You tap a yellow or green base: instant reinforcements.
+function footBoost(team){
+  if (!gameFoot || !home[team]) return;
+  const n = spawnSoldiers(team, REINFORCE_FOOT);
+  talk(n > 0 ? TEAM_NAME[team] + ' gets ' + n + ' more soldiers.' : TEAM_NAME[team] + ' already has a full company.', 1800);
+}
+// Every REINFORCE_EVERY seconds: foot armies get soldiers; red & blue get an engineer and a soldier,
+// so even a flattened base recovers.
+function reinforce(){
+  for (const t of FOOT) if (home[t]) spawnSoldiers(t, REINFORCE_FOOT);
+  for (const t of ['red', 'blue']){
+    const base = home[t];
+    if (!base) continue;
+    const dir = t === 'red' ? 1 : -1;
+    const engs = units.filter(u => !u.dead && u.team === t && u.kind === 'engineer').length;
+    if (engs < MAX_ENGINEERS){
+      const e = new Unit(t, 'engineer', base.x + dir * 46, base.y - 40); e.guard = true; units.push(e);
+    }
+    const s = new Unit(t, 'soldier', base.x + dir * 46, base.y + 40); s.guard = true; units.push(s);
+  }
+  if (myTeam === 'red' || myTeam === 'blue') talk('Reinforcements have arrived.', 1600);
+}
+
+function stepFoot(dt){
+  reinforceClock -= dt;
+  if (reinforceClock <= 0){ reinforceClock = REINFORCE_EVERY; reinforce(); }
+  if (!gameFoot) return;
+  for (const t of FOOT){
+    const base = home[t];
+    if (!base) continue;
+    waveClock[t] -= dt;
+    if (waveClock[t] > 0) continue;
+    waveClock[t] = WAVE_EVERY;
+    const have = units.filter(u => !u.dead && u.team === t).length;
+    const n = Math.min(WAVE_SIZE, SOLDIER_MAX - have);
+    const face = Math.atan2(WORLD_H / 2 - base.y, WORLD_W / 2 - base.x);
+    for (let i = 0; i < n; i++){
+      const a = face + (i - (n - 1) / 2) * 0.45;          // they step out in a fan
+      units.push(new Unit(t, 'soldier', base.x + Math.cos(a) * 48, base.y + Math.sin(a) * 48));
+    }
+  }
+  footThink -= dt;
+  if (footThink > 0) return;
+  footThink = 0.8;
+  for (const t of FOOT){
+    const thief = flag.held && flag.held.team !== t ? flag.held : null;
+    const ours  = flag.held && flag.held.team === t ? flag.held : null;
+    for (const u of units){
+      if (u.dead || u.team !== t) continue;
+      if (u.carrying){ u.order = null; continue; }                          // it heads home by itself
+      const go = thief || ours || flag;                                     // chase it, escort it, or fetch it
+      const jx = ours ? rnd(-30, 30) : 0, jy = ours ? rnd(-30, 30) : 0;      // an escort walks alongside, not on top
+      u.order = { type: 'move', x: go.x + jx, y: go.y + jy };
+    }
+  }
+}
+
+/* ---------------- buttons ---------------- */
+el('armies').onclick = () => {
+  footOn = !footOn;
+  el('armies').textContent = 'Armies: ' + (footOn ? 4 : 2);
+  talk((footOn ? 'Four armies' : 'Just red and blue') + ' from your next new game. Press New game to start one.', 3200);
+};
+el('side').onclick = () => {
+  myTeam = other(myTeam);
+  el('side').textContent = myTeam === 'red' ? 'Red' : 'Blue';
+  if (aiPlays) aiPlays = other(myTeam);
+  el('ai').textContent = aiPlays ? (aiPlays === 'red' ? 'Red' : 'Blue') + ' is the computer' : 'Two players';
+  sel = null; closeMenu();
+};
+el('ai').onclick = () => {
+  aiPlays = aiPlays ? null : other(myTeam);
+  el('ai').textContent = aiPlays ? (aiPlays === 'red' ? 'Red' : 'Blue') + ' is the computer' : 'Two players';
+  el('ai').classList.toggle('on', !!aiPlays);
+  talk(aiPlays ? 'The computer plays ' + aiPlays + '.' : 'Two players: use the You play button to swap sides.');
+};
+// Steps through your own vehicles one at a time and brings the map to them.
+// Much easier than tapping a moving jeep on a tablet.
+el('next').onclick = () => {
+  const list = units.filter(u => !u.dead && u.team === myTeam);
+  if (!list.length){ talk('You have no vehicles left.'); return; }
+  const i = list.indexOf(sel);
+  pending = null; group = [];
+  setSolo(list[(i + 1) % list.length]);
+  cam.x = sel.x; cam.y = sel.y; clampCam();
+  openMenu(sel);
+};
+el('target').onclick = () => {
+  WIN_AT = WIN_AT === 3 ? 5 : WIN_AT === 5 ? 10 : 3;
+  el('target').textContent = 'First to ' + WIN_AT;
+  talk(WIN_AT === 3 ? 'A short game: first to 3 flags.'
+     : WIN_AT === 5 ? 'First to 5 flags.'
+     : 'A long game: first to 10 flags.');
+  // in case the new target has already been passed
+  for (const t of TEAMS) if (!winner && score[t] >= WIN_AT){ winner = t; paused = true; }
+};
+el('level').onclick = () => {
+  level = level === 'easy' ? 'fair' : level === 'fair' ? 'hard' : 'easy';
+  el('level').textContent = 'Computer: ' + level;
+  talk(level === 'easy' ? 'The computer will build a small force and defend lightly.'
+     : level === 'fair' ? 'An even match.'
+     : 'The computer will out-build you and wall itself in.');
+};
+el('pause').onclick = () => {
+  if (winner) return;
+  paused = !paused;
+  el('pause').textContent = paused ? 'Carry on' : 'Pause';
+};
+el('again').onclick = () => { newGame(); talk('New game.'); };
+el('zoomin').onclick  = () => { cam.zoom = clamp(cam.zoom * 1.3, fitZoom(), 2.2); clampCam(); };
+el('zoomout').onclick = () => { cam.zoom = clamp(cam.zoom / 1.3, fitZoom(), 2.2); clampCam(); };
+function toggleFull(){
+  const r = document.documentElement;
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  if (fsEl){
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    const req = r.requestFullscreen || r.webkitRequestFullscreen;
+    if (req) req.call(r).catch(() => hideBars());
+    else hideBars();                                   // no fullscreen API (some tablets): scroll the bars away
+  }
+  setTimeout(resize, 200);
+}
+// the tablet fallback: scroll the page a hair so the browser hides its own bars
+function hideBars(){ window.scrollTo(0, 1); setTimeout(() => window.scrollTo(0, 1), 300); }
+el('full').onclick = toggleFull;
+el('fs').onclick = toggleFull;
+// Auto-fill screen on load
+window.addEventListener('load', () => { setTimeout(toggleFull, 100); });
+document.addEventListener('fullscreenchange', () => {
+  const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  el('full').textContent = on ? 'Leave full screen' : 'Fill the screen';
+  el('fs').textContent = on ? '✕' : '⛶';
+  setTimeout(resize, 120);
+});
+document.addEventListener('webkitfullscreenchange', () => {
+  const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  el('fs').textContent = on ? '✕' : '⛶';
+  setTimeout(resize, 120);
+});
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  const step = 60 / cam.zoom;
+  if (k === 'arrowleft'  || k === 'a') cam.x -= step;
+  if (k === 'arrowright' || k === 'd') cam.x += step;
+  if (k === 'arrowup'    || k === 'w') cam.y -= step;
+  if (k === 'arrowdown'  || k === 's') cam.y += step;
+  if (k === 'escape'){ pending = null; sel = null; closeMenu(); }
+  clampCam();
+});
+
+/* ---------------- the line along the bottom ---------------- */
+function paintInfo(){
+  if (winner){ el('info').textContent = TEAM_NAME[winner] + ' won. Press New game.'; return; }
+  if (pending){ el('info').textContent = pending.type === 'route'
+    ? 'Click each stop on the patrol route, in order.'
+    : pending.type === 'wall' ? 'Click the two ends of the wall.'
+    : pending.type === 'artyrow' ? (pending.pts.length ? 'Click the other end of the gun row.' : 'Click where the first gun goes.')
+    : pending.type === 'shell-multi' ? 'Click target ' + (pending.pts.length + 1) + ' (or click "Fire all targets" when done).'
+    : 'Now click the spot on the map.'; return; }
+  if (sel && !sel.dead){
+    let s = NAME[sel.kind] + '  ' + Math.ceil(sel.hp) + '/' + (sel.maxhp || '-') + ' life';
+    if (sel.kind === 'jeep') s += '  ' + Math.floor(sel.bullets) + ' bullets  ' + Math.floor(sel.grenades) + ' grenades';
+    if (sel.kind === 'tank') s += '  ' + Math.floor(sel.missiles) + ' missiles';
+    if (sel.kind === 'artillery') s += '  ' + sel.rounds + ' rounds' + (sel.off > 0 ? '  cooling off' : '');
+    else if (sel.plan) s += sel.planName === 'Gun row' ? '  building a gun row' : '  building a wall';
+    if (sel.route) s += '  patrolling ' + sel.route.length + ' stops';
+    else if (sel.kind !== 'artillery' && sel.kind !== 'factory' && !sel.order && !sel.guard) s += '  holding position';
+    if (sel.kind === 'factory' && sel.batch) s += '  run ' + sel.batch.made + ' of ' + sel.batch.total;
+    else if (sel.kind === 'factory' && !sel.queue) s += '  waiting for orders';
+    if (sel.carrying) s += '  carrying the flag';
+    el('info').textContent = s;
+    return;
+  }
+  el('info').textContent = 'Click one of your ' + myTeam + ' units to give it an order. Drag the map to look around.';
+}
+
+/* ---------------- the main loop ---------------- */
+let last = performance.now();
+function frame(now){
+  let dt = (now - last) / 1000; last = now;
+  dt = clamp(dt, 0, 0.05);                      // never a huge jump, and never backwards
+
+  if (!paused){
+    if (aiPlays) runAI(aiPlays, dt);
+    stepFoot(dt);
+    for (const u of units) if (!u.dead) stepUnit(u, dt);
+    for (const b of builds) if (!b.dead) stepBuild(b, dt);
+    stepShots(dt);
+    if (units.some(u => u.dead) ) units = units.filter(u => !u.dead);
+    if (builds.some(b => b.dead)) builds = builds.filter(b => !b.dead);
+    group = group.filter(u => !u.dead);
+    if (sel && sel.dead){ sel = group[0] || null; if (sel) openMenu(sel); else closeMenu(); }
+  }
+  draw();
+  paintInfo();
+  requestAnimationFrame(frame);
+}
+
+/* ---------------- upright screens ---------------- */
+let uprightOK = false;
+function checkTurn(){
+  const narrow = innerWidth < 820 && innerHeight > innerWidth;
+  el('turn').classList.toggle('show', narrow && !uprightOK);
+}
+el('anyway').onclick = () => { uprightOK = true; checkTurn(); setTimeout(resize, 60); };
+addEventListener('orientationchange', () => setTimeout(() => { checkTurn(); resize(); }, 300));
+
+addEventListener('resize', () => setTimeout(() => { checkTurn(); resize(); }, 60));
+resize();
+checkTurn();
+cam.zoom = fitZoom();
+newGame();
+requestAnimationFrame(frame);
+
+window.__ctf = { units: () => units, builds: () => builds, flag: () => flag, score: () => score,
+                 sel: () => sel, set team(t){ myTeam = t; }, newGame };
+</script>
+</body>
+</html>
